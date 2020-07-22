@@ -1,6 +1,5 @@
 (function () {
   var nowId = 0; //当前选中的文件夹
-  var topId = 0; // 顶层id
   var topPid = -1; // 顶层pid
 
   /* 视图渲染 */
@@ -18,7 +17,7 @@
       inner += '<li class="' + (isOpen(nowData[i].id, open) ? "open" : "") + '">';
       inner += `<p 
                   data-id="${nowData[i].id}"
-                  class="${hasChild ? 'has-child' : ''} active"
+                  class="${hasChild ? 'has-child' : ''}"
                   style="padding-left: ${(level * 20 + 40)}px;">
                   <span>${nowData[i].title}</span>
                 </p>`
@@ -70,6 +69,7 @@
     }
     return inner;
   }
+
 
   /* 三大视图点击切换 */
   // 左侧菜单点击切换
@@ -230,8 +230,77 @@
       data.splice(index, 1);
     }
   }
+  // 判断是否重名
+  function testName (title, pid, id) {
+    var child = getChild(pid);
+    for (var i = 0; i < child.length; i++) {
+      if (child[i].title == title && child[i].id != id) return true;
+    }
+    return false;
+  }
+  // 判断是否是它自己或它的子目录
+  function testSelf (id, pid) {
+    if (id == pid) return true
+    var child = getAllChild(id);
+    for (var i = 0; i < child.length; i++) {
+      if (child[i].id == pid) return true;
+    }
+    return false;
+  }
+  // 获取选中的文件夹
+  function getCheckedData () {
+    var child = getChild(nowId);
+    var checkedData = [];
+    for (var i = 0; i < child.length; i++) {
+      if (child[i].checked) checkedData.push(child[i]);
+    }
+    return checkedData;
+  }
+  // 重命名
+  function rename (el) {
+    var folderName = el.querySelector(".folder-name");
+    var editor = el.querySelector(".editor");
+    var id = el.dataset.id;
+    var self = getSelf(id);
+    folderName.style.display = "none";
+    editor.value = folderName.innerHTML;
+    editor.style.display = "block";
+    editor.select();
+    editor.onblur = function () {
+      var newName = editor.value;
+      if (newName.trim() === "") {
+        warningPopup("请输入内容");
+        editor.focus();
+        return;
+      }
+      if (testName(newName, nowId, id)) {
+        warningPopup("重名了，再起个名字吧");
+        editor.focus();
+        return;
+      }
+      self.title = newName;
+      folderName.innerHTML = newName;
+      folderName.style.display = "block";
+      editor.style.display = "none";
+      treeMenu.innerHTML = createTreeMenu(topPid, 0);
+      successPopup("重命名成功");
+    };
+  }
+  // 是否框柱文件夹
+  function isCollision (el, el2) {
+    var elRect = el.getBoundingClientRect();
+    var el2Rect = el2.getBoundingClientRect();
+    if (elRect.top > el2Rect.bottom
+      || el2Rect.top > elRect.bottom
+      || elRect.left > el2Rect.right
+      || el2Rect.left > elRect.right) {
+      return false;//没有碰撞
+    }
+    return true;//碰撞
+  }
 
-  /* 新建文件夹 */
+  /* 导航栏操作 */
+  // 新建文件夹 
   var createBtn = document.querySelector(".create-btn");
   createBtn.onclick = function () {
     add(nowId);
@@ -239,31 +308,65 @@
     folders.innerHTML = createFolders();
     successPopup("添加文件成功");
   };
-
-  /* 各种弹窗 */
-
-  // 操作成功提示
-  var alertSuccess = document.querySelector(".alert-success");
-  var successTimer = 0;
-  function successPopup (info) {
-    // info 需要提示的信息
-    alertSuccess.innerHTML = info;
-    alertSuccess.classList.add("alert-show");
-    clearTimeout(successTimer);
-    successTimer = setTimeout(function () {
-      alertSuccess.classList.remove("alert-show");
-    }, 2000);
+  // 批量删除文件夹
+  var delBtn = document.querySelector(".del-btn");
+  delBtn.onclick = function () {
+    var checkedData = getCheckedData();
+    if (checkedData.length == 0) {
+      warningPopup("请先选择要操作的文件夹");
+      return;
+    }
+    showConfirm("确定删除选中的文件夹吗", function () {
+      for (var i = 0; i < checkedData.length; i++) {
+        removeData(checkedData[i].id);
+      }
+      treeMenu.innerHTML = createTreeMenu(topPid, 0);
+      folders.innerHTML = createFolders();
+      successPopup("删除文件夹成功");
+    });
   }
+  // 批量移动文件夹
+  var moveBtn = document.querySelector(".move-btn");
+  moveBtn.onclick = function () {
+    var checkedData = getCheckedData();
+    if (checkedData.length == 0) {
+      warningPopup("请先选择要操作的文件夹");
+      return;
+    }
+    showMoveAlert(function () {
+      for (var i = 0; i < checkedData.length; i++) {
+        if (testName(checkedData[i].title, move_pid)) {
+          warningPopup("文件夹有重名不能移动")
+          return;
+        }
+        if (testSelf(checkedData[i].id, move_pid)) {
+          warningPopup("不能移动到《" + checkedData[i].title + "》及其子目录下");
+          return;
+        }
+      }
+      for (var i = 0; i < checkedData.length; i++) {
+        checkedData[i].pid = move_pid;
+      }
+      moveAlert.classList.remove("move-alert-show");
+      mask.style.display = "none";
+      nowId = move_pid;
+      treeMenu.innerHTML = createTreeMenu(topPid, 0);
+      folders.innerHTML = createFolders();
+      breadNav.innerHTML = createBreadNav();
+      successPopup("文件夹移动成功");
+    });
+  };
+
 
   /* 右键菜单 */
   var contextmenu = document.querySelector("#contextmenu");
-  var contextmenuBtn = contextmenu.children;
+  var contextmenuBtn = contextmenu.children;// 菜单按钮
   document.oncontextmenu = function () {
     contextmenu.style.display = "none";
     return false;
   };
   // 文件夹右键菜单
-  var active_id = 0;
+  var active_id = 0; //右键点击的文件id
   folders.oncontextmenu = function (e) {
     var item;
     switch (e.target.tagName) {
@@ -283,9 +386,11 @@
       return false;
     }
   };
+  // 点击其它地方,右键菜单消失
   document.onmousedown = function () {
     contextmenu.style.display = "none";
   };
+  // 防止冒泡
   contextmenu.onmousedown = function (e) {
     e.cancelBubble = true;
   };
@@ -299,14 +404,138 @@
     });
     contextmenu.style.display = "none";
   };
+  // 移动当前文件夹
+  contextmenuBtn[1].onclick = function () {
+    contextmenu.style.display = "none";
+    showMoveAlert(function () {
+      // move_pid 移动到的目录
+      // active_id 当前目录
+      var self = getSelf(active_id);
+      if (testName(self.title, move_pid)) {
+        warningPopup("文件夹有重名不能移动")
+        return;
+      }
+      if (testSelf(active_id, move_pid)) {
+        warningPopup("不能移动到《" + self.title + "》及其子目录下");
+        return;
+      }
+      self.pid = move_pid;
+      moveAlert.classList.remove("move-alert-show");
+      mask.style.display = "none";
+      nowId = move_pid;
+      treeMenu.innerHTML = createTreeMenu(topPid, 0);
+      folders.innerHTML = createFolders();
+      breadNav.innerHTML = createBreadNav();
+      successPopup("文件夹移动成功");
+    });
+  };
+  // 文件夹重命名
+  contextmenuBtn[2].onclick = function () {
+    var folderItem = folders.querySelector('.folder-item[data-id="' + active_id + '"]')
+    contextmenu.style.display = "none";
+    rename(folderItem)
+  };
 
 
+  /* 文件夹的选择操作 */
+  // 全选按钮的操作
+  checkedAll.onchange = function () {
+    var nowData = getChild(nowId);
+    for (var i = 0; i < nowData.length; i++) {
+      nowData[i].checked = this.checked;
+    }
+    folders.innerHTML = createFolders();
+  };
+  // 每个文件夹的选中操作
+  folders.onchange = function (e) {
+    if (e.target.parentNode.className == "checked") {
+      var folderItem = e.target.parentNode.parentNode;
+      var self = getSelf(folderItem.dataset.id);
+      self.checked = e.target.checked;
+      if (self.checked) {
+        folderItem.classList.add("active");
+      } else {
+        folderItem.classList.remove("active");
+      }
+      checkedAll.checked = isCheckedAll();// 如果所有项都被选择则全选变为勾选
+    }
+  };
+  // 框选操作
+  folders.onmousedown = function (e) {
+    if (e.target == folders) {
+      // 在空白区域按下准备话框
+      var selectBox = null;
+      var startClient = {
+        x: e.clientX,
+        y: e.clientY
+      };
+      var folderItem = folders.querySelectorAll(".folder-item");
+      document.onmousemove = function (e) {
+        var nowClient = {
+          x: e.clientX,
+          y: e.clientY
+        };
+        if (!selectBox) {
+          selectBox = document.createElement("div");
+          selectBox.id = "select-box";
+          document.body.appendChild(selectBox);
+        }
+        selectBox.style.left = Math.min(nowClient.x, startClient.x) + "px";
+        selectBox.style.top = Math.min(nowClient.y, startClient.y) + "px";
+        selectBox.style.width = Math.abs(nowClient.x - startClient.x) + "px";
+        selectBox.style.height = Math.abs(nowClient.y - startClient.y) + "px";
+        for (var i = 0; i < folderItem.length; i++) {
+          var checked = folderItem[i].querySelector('input[type="checkbox"]');
+          var self = getSelf(folderItem[i].dataset.id);
+          self.checked = checked.checked = isCollision(folderItem[i], selectBox);
+          if (self.checked) {
+            folderItem[i].classList.add("active");
+          } else {
+            folderItem[i].classList.remove("active");
+          }
+        }
+        checkedAll.checked = isCheckedAll();
+      };
+      document.onmouseup = function () {
+        if (selectBox) {
+          document.body.removeChild(selectBox);
+        }
+        document.onmousemove = document.onmouseup = null;
+      }
+    }
+  };
+
+
+  /* 各种弹窗 */
+  // 操作成功提示
+  var alertSuccess = document.querySelector(".alert-success");
+  var successTimer = 0;
+  function successPopup (info) {// info 需要提示的信息
+    alertSuccess.innerHTML = info;
+    alertSuccess.classList.add("alert-show");
+    clearTimeout(successTimer);
+    successTimer = setTimeout(function () {
+      alertSuccess.classList.remove("alert-show");
+    }, 2000);
+  }
+  // 操作失败提示
+  var alertWarning = document.querySelector(".alert-warning");
+  var warningTimer = 0;
+  function warningPopup (info) {
+    alertWarning.innerHTML = info;
+    alertWarning.classList.add("alert-show");
+    clearTimeout(warningTimer);
+    warningTimer = setTimeout(function () {
+      alertWarning.classList.remove("alert-show");
+    }, 2000);
+  }
   /* confirm 弹窗 */
   var elConfirm = document.querySelector(".confirm");
   var confirmClos = elConfirm.querySelector(".clos");
   var confirmTxt = elConfirm.querySelector(".confirm-text");
   var confirmBtns = elConfirm.querySelectorAll(".confirm-btns a");
   var mask = document.getElementById("mask");
+  // 展现确认弹窗
   function showConfirm (txt, cb) {
     mask.style.display = "block";
     elConfirm.classList.add("confirm-show");
@@ -317,14 +546,52 @@
       cb && cb();
     };
   }
+  // 点击取消和关闭弹窗
   confirmBtns[1].onclick = confirmClos.onclick = function () {
     elConfirm.classList.remove("confirm-show");
     mask.style.display = "none";
   };
 
 
-
-
-
+  /* 点击移动显示的弹窗 */
+  var moveAlert = document.querySelector(".move-alert");
+  var moveClos = moveAlert.querySelector(".clos");
+  var moveAlertMenu = moveAlert.querySelector(".move-alert-menu");
+  var moveBtns = moveAlert.querySelectorAll(".confirm-btns a");
+  var move_pid = 0;
+  // 选择节点
+  moveAlertMenu.onclick = function (e) {
+    var item;
+    switch (e.target.tagName) {
+      case "P":
+        item = e.target;
+        break;
+      case "SPAN":
+        item = e.target.parentNode;
+        break;
+    }
+    if (item) {
+      var p = moveAlertMenu.querySelectorAll("p");
+      move_pid = item.dataset.id;
+      for (var i = 0; i < p.length; i++) {
+        p[i].classList.remove("active");
+      }
+      item.classList.add("active");
+    }
+  };
+  // 点击关闭和取消事件
+  moveClos.onclick = moveBtns[1].onclick = function () {
+    mask.style.display = "none";
+    moveAlert.classList.remove("move-alert-show");
+  }
+  function showMoveAlert (cb) {
+    move_pid = nowId;
+    moveAlertMenu.innerHTML = createTreeMenu(topPid, 0, true);
+    mask.style.display = "block";
+    moveAlert.classList.add("move-alert-show");
+    moveBtns[0].onclick = function () {
+      cb();
+    };
+  }
 
 })()
